@@ -1,4 +1,4 @@
-#此为实验，main.py中写死
+# 临时实验用的固定搜索结果；当前 main.py 流程直接使用此实现。
 def mock_search(query: str) -> list[dict[str, str]]:
     return [
         {

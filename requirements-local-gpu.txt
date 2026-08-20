@@ -1,0 +1,5 @@
+# 仅用于本机 GPU 版 BGE-M3 Provider；不作为 Docker 默认依赖。
+# 请先按 PyTorch 官方 CUDA 指引安装 torch / torchvision。
+-r requirements.txt
+FlagEmbedding==1.4.0
+transformers==4.57.1
