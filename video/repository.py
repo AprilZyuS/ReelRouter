@@ -1,11 +1,14 @@
+import json
 from typing import Protocol
 
 from video.output_review import VideoOutputReview
 from video.schemas import (
     CostRecord,
     CostSource,
+    GenerationMode,
     JobStatus,
     VideoGenerationJob,
+    VideoRequest,
 )
 import pymysql
 from pymysql.cursors import DictCursor
@@ -61,6 +64,24 @@ class MySQLVideoJobRepository:
             autocommit=False,
         )
 
+    def _add_column_if_missing(
+        self,
+        cursor,
+        table_name: str,
+        column_name: str,
+        definition: str,
+    ) -> None:
+        """为已存在的开发库执行可重复的轻量迁移。"""
+        cursor.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s AND column_name = %s
+            """,
+            (self.settings.database, table_name, column_name),
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {definition}")
+
     def setup(self) -> None:
         """首次运行时创建业务表；重复调用也安全。"""
         connection = self._connect()
@@ -72,7 +93,9 @@ class MySQLVideoJobRepository:
                     CREATE TABLE IF NOT EXISTS video_jobs (
                         job_id VARCHAR(64) PRIMARY KEY,
                         model_id VARCHAR(128) NOT NULL,
+                        provider VARCHAR(64) NOT NULL DEFAULT 'mock-provider',
                         status VARCHAR(32) NOT NULL,
+                        request_json JSON NULL,
 
                         estimated_cost_usd DECIMAL(10, 4) NOT NULL,
                         reported_cost_usd DECIMAL(10, 4) NULL,
@@ -114,6 +137,19 @@ class MySQLVideoJobRepository:
                     """
                 )
 
+                self._add_column_if_missing(
+                    cursor,
+                    "video_jobs",
+                    "provider",
+                    "provider VARCHAR(64) NOT NULL DEFAULT 'mock-provider'",
+                )
+                self._add_column_if_missing(
+                    cursor,
+                    "video_jobs",
+                    "request_json",
+                    "request_json JSON NULL",
+                )
+
             connection.commit()
 
         except Exception:
@@ -134,7 +170,9 @@ class MySQLVideoJobRepository:
                     INSERT INTO video_jobs (
                         job_id,
                         model_id,
+                        provider,
                         status,
+                        request_json,
                         estimated_cost_usd,
                         reported_cost_usd,
                         cost_source,
@@ -143,10 +181,12 @@ class MySQLVideoJobRepository:
                         failure_message,
                         retryable
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         model_id = VALUES(model_id),
+                        provider = VALUES(provider),
                         status = VALUES(status),
+                        request_json = VALUES(request_json),
                         estimated_cost_usd = VALUES(estimated_cost_usd),
                         reported_cost_usd = VALUES(reported_cost_usd),
                         cost_source = VALUES(cost_source),
@@ -158,7 +198,9 @@ class MySQLVideoJobRepository:
                     (
                         job.job_id,
                         job.model_id,
+                        job.provider,
                         job.status.value,
+                        self._serialize_request(job.request),
                         job.cost.estimated_usd,
                         job.cost.reported_usd,
                         job.cost.source.value,
@@ -219,7 +261,9 @@ class MySQLVideoJobRepository:
                     SELECT
                         j.job_id,
                         j.model_id,
+                        j.provider,
                         j.status,
+                        j.request_json,
                         j.estimated_cost_usd,
                         j.reported_cost_usd,
                         j.cost_source,
@@ -272,11 +316,14 @@ class MySQLVideoJobRepository:
         )
 
         retryable = row["retryable"]
+        request = self._deserialize_request(row.get("request_json"))
         return VideoGenerationJob(
             job_id=row["job_id"],
             model_id=row["model_id"],
             status=JobStatus(row["status"]),
             cost=cost,
+            provider=row.get("provider") or "mock-provider",
+            request=request,
             output_url=row["output_url"],
             failure_code=row["failure_code"],
             failure_message=row["failure_message"],
@@ -286,4 +333,36 @@ class MySQLVideoJobRepository:
                 else None
             ),
             output_review=output_review,
+        )
+
+    @staticmethod
+    def _serialize_request(request: VideoRequest | None) -> str | None:
+        if request is None:
+            return None
+        return json.dumps(
+            {
+                "prompt": request.prompt,
+                "mode": request.mode.value,
+                "duration_seconds": request.duration_seconds,
+                "budget_usd": request.budget_usd,
+                "reference_image_url": request.reference_image_url,
+                "min_quality_score": request.min_quality_score,
+            },
+            ensure_ascii=False,
+        )
+
+    @staticmethod
+    def _deserialize_request(raw_request: object) -> VideoRequest | None:
+        if raw_request is None:
+            return None
+        data = json.loads(raw_request) if isinstance(raw_request, str) else raw_request
+        if not isinstance(data, dict):
+            raise RuntimeError("video_jobs.request_json 无效。")
+        return VideoRequest(
+            prompt=str(data["prompt"]),
+            mode=GenerationMode(str(data["mode"])),
+            duration_seconds=int(data["duration_seconds"]),
+            budget_usd=float(data["budget_usd"]),
+            reference_image_url=data.get("reference_image_url"),
+            min_quality_score=int(data.get("min_quality_score", 1)),
         )

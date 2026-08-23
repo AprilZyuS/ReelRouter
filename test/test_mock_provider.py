@@ -2,7 +2,14 @@ import pytest
 
 from video.model_registry import get_model
 from video.providers.mock_provider import MockVideoProvider
-from video.schemas import CostSource, GenerationMode, JobStatus, VideoRequest
+from video.schemas import (
+    CostRecord,
+    CostSource,
+    GenerationMode,
+    JobStatus,
+    VideoGenerationJob,
+    VideoRequest,
+)
 
 
 def make_text_to_video_request(duration_seconds: int = 5) -> VideoRequest:
@@ -53,7 +60,7 @@ def test_first_poll_changes_job_to_processing():
     provider = MockVideoProvider()
     job = provider.submit(make_text_to_video_request(), get_model("mock-economy"))
 
-    updated_job = provider.poll(job.job_id)
+    updated_job = provider.poll(job)
 
     assert updated_job.status == JobStatus.PROCESSING
     assert updated_job.output_url is None
@@ -63,8 +70,8 @@ def test_second_poll_completes_job_and_returns_video_url():
     provider = MockVideoProvider()
     job = provider.submit(make_text_to_video_request(), get_model("mock-economy"))
 
-    provider.poll(job.job_id)
-    completed_job = provider.poll(job.job_id)
+    provider.poll(job)
+    completed_job = provider.poll(job)
 
     assert completed_job.status == JobStatus.COMPLETED
     assert completed_job.output_url == f"https://example.com/videos/{job.job_id}.mp4"
@@ -74,9 +81,9 @@ def test_completed_job_stays_completed_when_polled_again():
     provider = MockVideoProvider()
     job = provider.submit(make_text_to_video_request(), get_model("mock-economy"))
 
-    provider.poll(job.job_id)
-    completed_job = provider.poll(job.job_id)
-    polled_again_job = provider.poll(job.job_id)
+    provider.poll(job)
+    completed_job = provider.poll(job)
+    polled_again_job = provider.poll(job)
 
     assert polled_again_job.status == JobStatus.COMPLETED
     assert polled_again_job.output_url == completed_job.output_url
@@ -86,4 +93,11 @@ def test_poll_unknown_job_id_raises_value_error():
     provider = MockVideoProvider()
 
     with pytest.raises(ValueError, match="不存在任务"):
-        provider.poll("unknown-job-id")
+        provider.poll(
+            VideoGenerationJob(
+                job_id="unknown-job-id",
+                model_id="mock-economy",
+                status=JobStatus.QUEUED,
+                cost=CostRecord(estimated_usd=0, reported_usd=None, source=CostSource.ESTIMATED),
+            )
+        )

@@ -1,5 +1,6 @@
 import pymysql
 
+from video.approval_repository import MySQLVideoApprovalRepository
 from video.mysql_config import load_mysql_settings
 from video.repository import MySQLVideoJobRepository
 from uuid import uuid4
@@ -8,8 +9,10 @@ from video.output_review import VideoOutputReview
 from video.schemas import (
     CostRecord,
     CostSource,
+    GenerationMode,
     JobStatus,
     VideoGenerationJob,
+    VideoRequest,
 )
 
 
@@ -18,6 +21,7 @@ def test_setup_creates_video_tables():
     repository = MySQLVideoJobRepository(settings)
 
     repository.setup()
+    MySQLVideoApprovalRepository(settings).setup()
 
     connection = pymysql.connect(
         host=settings.host,
@@ -40,6 +44,7 @@ def test_setup_creates_video_tables():
 
     assert "video_jobs" in table_names
     assert "video_output_reviews" in table_names
+    assert "video_pending_approvals" in table_names
 
 def test_save_and_get_completed_job_with_review():
     settings = load_mysql_settings()
@@ -56,6 +61,14 @@ def test_save_and_get_completed_job_with_review():
             source=CostSource.PROVIDER_REPORTED,
         ),
         output_url="https://example.com/generated.mp4",
+        provider="runway",
+        request=VideoRequest(
+            prompt="一段可恢复查询的视频请求。",
+            mode=GenerationMode.TEXT_TO_VIDEO,
+            duration_seconds=2,
+            budget_usd=1.0,
+            min_quality_score=5,
+        ),
         output_review=VideoOutputReview(
             accepted=True,
             visual_quality_score=4,
@@ -77,6 +90,8 @@ def test_save_and_get_completed_job_with_review():
     assert loaded_job.output_review is not None
     assert loaded_job.output_review.accepted is True
     assert loaded_job.output_review.visual_quality_score == 4
+    assert loaded_job.provider == "runway"
+    assert loaded_job.request == job.request
 
 def test_get_returns_none_for_unknown_job():
     settings = load_mysql_settings()

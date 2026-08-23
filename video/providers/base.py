@@ -25,6 +25,6 @@ class VideoProvider(Protocol):
         """提交视频生成任务，并返回初始任务状态。"""
         ...
 
-    def poll(self, job_id: str) -> VideoGenerationJob:
-        """根据任务 ID 查询最新生成状态。"""
+    def poll(self, job: VideoGenerationJob) -> VideoGenerationJob:
+        """根据已持久化任务查询最新状态，不能依赖本进程内缓存。"""
         ...

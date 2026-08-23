@@ -7,7 +7,15 @@ import pytest
 
 from video.providers.runway_provider import RunwayProvider
 from video.runway_config import RunwaySettings
-from video.schemas import CostSource, GenerationMode, JobStatus, VideoModelProfile, VideoRequest
+from video.schemas import (
+    CostRecord,
+    CostSource,
+    GenerationMode,
+    JobStatus,
+    VideoGenerationJob,
+    VideoModelProfile,
+    VideoRequest,
+)
 
 
 def make_runway_model() -> VideoModelProfile:
@@ -104,9 +112,10 @@ def test_poll_maps_pending_running_and_succeeded_to_domain_job_states():
     provider = make_provider(httpx.MockTransport(handler))
     submitted = provider.submit(make_request(), make_runway_model())
 
-    assert provider.poll(submitted.job_id).status == JobStatus.QUEUED
-    assert provider.poll(submitted.job_id).status == JobStatus.PROCESSING
-    completed = provider.poll(submitted.job_id)
+    assert provider.poll(submitted).status == JobStatus.QUEUED
+    processing = provider.poll(submitted)
+    assert processing.status == JobStatus.PROCESSING
+    completed = provider.poll(processing)
 
     assert completed.status == JobStatus.COMPLETED
     assert completed.output_url == "https://cdn.runway/video.mp4"
@@ -121,7 +130,7 @@ def test_poll_maps_failed_task_to_failed_job():
     provider = make_provider(httpx.MockTransport(handler))
     submitted = provider.submit(make_request(), make_runway_model())
 
-    assert provider.poll(submitted.job_id).status == JobStatus.FAILED
+    assert provider.poll(submitted).status == JobStatus.FAILED
 
 
 def test_submit_converts_http_error_to_clear_runtime_error():
@@ -133,13 +142,20 @@ def test_submit_converts_http_error_to_clear_runtime_error():
         provider.submit(make_request(), make_runway_model())
 
 
-def test_poll_unknown_job_is_rejected_before_requesting_runway():
+def test_poll_job_for_other_provider_is_rejected_before_requesting_runway():
     provider = make_provider(
         httpx.MockTransport(lambda request: pytest.fail("不应该发送 HTTP 请求"))
     )
 
-    with pytest.raises(ValueError, match="不存在任务"):
-        provider.poll("unknown-job")
+    submitted = VideoGenerationJob(
+        job_id="unknown-job",
+        model_id="mock-economy",
+        status=JobStatus.QUEUED,
+        cost=CostRecord(estimated_usd=0, reported_usd=None, source=CostSource.ESTIMATED),
+        provider="mock-provider",
+    )
+    with pytest.raises(ValueError, match="provider 为 runway"):
+        provider.poll(submitted)
 @pytest.mark.parametrize(
     ("failure_code", "expected_retryable"),
     [
@@ -168,7 +184,7 @@ def test_poll_maps_runway_failure_code_to_retry_policy(
 
     provider = make_provider(httpx.MockTransport(handler))
     submitted = provider.submit(make_request(), make_runway_model())
-    failed = provider.poll(submitted.job_id)
+    failed = provider.poll(submitted)
 
     assert failed.status == JobStatus.FAILED
     assert failed.failure_code == failure_code
@@ -188,7 +204,7 @@ def test_poll_unknown_failure_code_requires_human_decision():
     provider = make_provider(httpx.MockTransport(handler))
     submitted = provider.submit(make_request(), make_runway_model())
 
-    assert provider.poll(submitted.job_id).retryable is None
+    assert provider.poll(submitted).retryable is None
 
 
 def test_poll_canceled_task_is_not_retryable():
@@ -199,8 +215,42 @@ def test_poll_canceled_task_is_not_retryable():
 
     provider = make_provider(httpx.MockTransport(handler))
     submitted = provider.submit(make_request(), make_runway_model())
-    canceled = provider.poll(submitted.job_id)
+    canceled = provider.poll(submitted)
 
     assert canceled.status == JobStatus.FAILED
     assert canceled.failure_message == "任务已被取消。"
     assert canceled.retryable is False
+
+
+def test_poll_uses_persisted_job_snapshot_not_process_local_cache():
+    """模拟进程重启后，仍可凭保存的任务快照重新查询 Provider。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v1/tasks/runway-restored-job"
+        return httpx.Response(
+            200,
+            json={
+                "status": "SUCCEEDED",
+                "output": ["https://cdn.runway.example/restored.mp4"],
+            },
+        )
+
+    provider = make_provider(httpx.MockTransport(handler))
+    restored_job = VideoGenerationJob(
+        job_id="runway-restored-job",
+        model_id="runway-gen4.5",
+        status=JobStatus.PROCESSING,
+        cost=CostRecord(
+            estimated_usd=0.6,
+            reported_usd=None,
+            source=CostSource.ESTIMATED,
+        ),
+        provider="runway",
+        request=make_request(),
+    )
+
+    job = provider.poll(restored_job)
+
+    assert job.status == JobStatus.COMPLETED
+    assert job.output_url == "https://cdn.runway.example/restored.mp4"
+    assert job.request == restored_job.request

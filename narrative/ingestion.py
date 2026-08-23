@@ -80,3 +80,7 @@ class NarrativeIngestionService:
             chunk_count=len(chunks),
             index_rebuilt=True,
         )
+
+    def rebuild_project_index(self, project_id: str) -> None:
+        """在发布新的项目 Profile 后重建其当前版本索引。"""
+        self.index_rebuilder.rebuild_project_index(project_id)

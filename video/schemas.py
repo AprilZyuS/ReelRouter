@@ -93,6 +93,10 @@ class VideoGenerationJob:
     status: JobStatus
     # 单任务成本记录。reported_usd 为 None 时，绝不能对外称为实际成本。
     cost: CostRecord
+    # Provider 是持久化任务的外部执行者。重启后不能从进程内对象猜测它。
+    provider: str = "mock-provider"
+    # 保存提交快照，用于审计、失败诊断与后续受控重试；不保存密钥。
+    request: VideoRequest | None = None
     output_url: str | None = None
     failure_code: str | None = None
     failure_message: str | None = None

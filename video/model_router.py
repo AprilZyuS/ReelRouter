@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 # Costing 只负责算成本，不负责选择模型。
@@ -30,7 +31,11 @@ class ModelSelection:
     reason: str
 
 
-def select_model(request: VideoRequest) -> ModelSelection:
+def select_model(
+    request: VideoRequest,
+    *,
+    models: Sequence[VideoModelProfile] | None = None,
+) -> ModelSelection:
     """
     根据用户的视频需求，选择满足所有硬约束且成本最低的模型。
 
@@ -54,7 +59,7 @@ def select_model(request: VideoRequest) -> ModelSelection:
     # 也会在 supports_request() 中被淘汰。
     compatible_models = [
         model
-        for model in list_models()
+        for model in (list(models) if models is not None else list_models())
         if supports_request(model, request)
     ]
 

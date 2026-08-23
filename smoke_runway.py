@@ -34,11 +34,11 @@ request = VideoRequest(
 )
 
 job = provider.submit(request, model)
-print(f"已提交：{job.job_id}，预估成本：${job.estimated_cost_usd}")
+print(f"已提交：{job.job_id}，预估成本：${job.cost.estimated_usd}")
 
 for _ in range(12):  # 最多等约 60 秒
     time.sleep(5)
-    job = provider.poll(job.job_id)
+    job = provider.poll(job)
     print(f"当前状态：{job.status.value}")
 
     if job.status == JobStatus.COMPLETED:

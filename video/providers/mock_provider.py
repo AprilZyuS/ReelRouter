@@ -26,6 +26,8 @@ class MockVideoProvider:
         model: VideoModelProfile,
     ) -> VideoGenerationJob:
         """提交一个生成任务，并立即返回处于排队状态的任务对象。"""
+        if model.provider != "mock-provider":
+            raise ValueError("MockVideoProvider 只能执行 mock-provider 模型。")
         job_id = str(uuid4())
         estimated_cost = self.estimate_cost(request, model)
         job = VideoGenerationJob(
@@ -37,16 +39,18 @@ class MockVideoProvider:
                 reported_usd=None,
                 source=CostSource.ESTIMATED,
             ),
+            provider="mock-provider",
+            request=request,
         )
         self._jobs[job_id] = job
         return job
 
-    def poll(self, job_id: str) -> VideoGenerationJob:
+    def poll(self, job: VideoGenerationJob) -> VideoGenerationJob:
         """查询任务，并用状态机模拟一次异步处理进度。"""
         try:
-            job = self._jobs[job_id]
+            job = self._jobs[job.job_id]
         except KeyError as error:
-            raise ValueError(f"不存在任务：{job_id}") from error
+            raise ValueError(f"Mock Provider 不存在任务：{job.job_id}") from error
 
         if job.status == JobStatus.QUEUED:
             job.status = JobStatus.PROCESSING

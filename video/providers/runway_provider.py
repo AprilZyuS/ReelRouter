@@ -85,7 +85,6 @@ class RunwayProvider:
             timeout=settings.timeout_seconds,
         )
         self._client.headers.update(self._headers())
-        self._jobs: dict[str, VideoGenerationJob] = {}
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -106,6 +105,13 @@ class RunwayProvider:
         try:
             response = self._client.request(method, path, **kwargs)
             response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            # 400 的详细原因通常在 JSON/body 中；保留有限长度诊断，不能只报状态码。
+            body = error.response.text.strip().replace("\n", " ")[:1_000]
+            suffix = f"；Provider 详情：{body}" if body else ""
+            raise RuntimeError(
+                f"Runway API 请求失败：{error}{suffix}"
+            ) from error
         except httpx.HTTPError as error:
             raise RuntimeError(f"Runway API 请求失败：{error}") from error
         payload = response.json()
@@ -129,9 +135,14 @@ class RunwayProvider:
         }
         if request.mode == GenerationMode.IMAGE_TO_VIDEO:
             payload["promptImage"] = request.reference_image_url
-            path = "image_to_video"
-        else:
-            path = "text_to_video"
+        # 端点必须按输入模式选择。虽然部分 Runway 文档示例展示了不带
+        # promptImage 的 image_to_video 调用，但当前 API 实际校验要求该字段；
+        # text-to-video 必须走 text_to_video，image-to-video 才走 image_to_video。
+        path = (
+            "image_to_video"
+            if request.mode == GenerationMode.IMAGE_TO_VIDEO
+            else "text_to_video"
+        )
 
         result = self._request("POST", path, json=payload)
         task_id = result.get("id")
@@ -147,18 +158,16 @@ class RunwayProvider:
                 reported_usd=None,
                 source=CostSource.ESTIMATED,
             ),
+            provider="runway",
+            request=request,
         )
-        self._jobs[job.job_id] = job
         return job
 
-    def poll(self, job_id: str) -> VideoGenerationJob:
+    def poll(self, previous_job: VideoGenerationJob) -> VideoGenerationJob:
         """读取最新状态；不在 Web 请求中 sleep 等待生成完成。"""
-        try:
-            previous_job = self._jobs[job_id]
-        except KeyError as error:
-            raise ValueError(f"不存在任务：{job_id}") from error
-
-        result = self._request("GET", f"tasks/{job_id}")
+        if previous_job.provider != "runway":
+            raise ValueError("RunwayProvider 只能轮询 provider 为 runway 的任务。")
+        result = self._request("GET", f"tasks/{previous_job.job_id}")
         raw_status = result.get("status")
         if not isinstance(raw_status, str):
             raise RuntimeError("Runway API 响应中缺少状态 status。")
@@ -182,11 +191,12 @@ class RunwayProvider:
             model_id=previous_job.model_id,
             status=status,
             cost=previous_job.cost,
+            provider=previous_job.provider,
+            request=previous_job.request,
             output_url=output_url,
             failure_code=failure_code,
             failure_message=failure_message,
             retryable=retryable,
             output_review=previous_job.output_review,
         )
-        self._jobs[job_id] = updated_job
         return updated_job

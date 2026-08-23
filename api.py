@@ -1,10 +1,12 @@
 from typing import Literal
 from uuid import uuid4
+from functools import lru_cache
+import os
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from graph import graph
 from langgraph.types import Command
 from video.api_router import router as video_router
 
@@ -14,7 +16,31 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# 浏览器前端与 FastAPI 在开发环境使用不同端口；明确列出可信来源，
+# 不使用允许任意来源的 CORS 配置。
+_default_web_origins = "http://127.0.0.1:5173,http://localhost:5173"
+_web_origins = [
+    origin.strip()
+    for origin in os.getenv("WEB_ALLOWED_ORIGINS", _default_web_origins).split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_web_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
+
 app.include_router(video_router)
+
+
+@lru_cache
+def get_research_graph():
+    """旧版调研练习仅在调用 /research 时加载，不能阻断视频 API 启动。"""
+    from graph import graph
+
+    return graph
 
 class ResearchRequest(BaseModel):
     task: str = Field(
@@ -44,7 +70,7 @@ class ResearchResponse(BaseModel):
     human_choice: str
     interrupt: dict | None = None
 
-def build_response(result, thread_id: str) -> ResearchResponse:
+def build_response(result, thread_id: str, graph) -> ResearchResponse:
     config = {
         "configurable": {
             "thread_id": thread_id,
@@ -102,9 +128,10 @@ def research(request: ResearchRequest):
         "human_choice": "",
     }
 
+    graph = get_research_graph()
     result = graph.invoke(initial_state, config=config)
 
-    return build_response(result, thread_id)
+    return build_response(result, thread_id, graph)
 
 @app.post(
     "/research/{thread_id}/resume",
@@ -118,6 +145,7 @@ def resume_research(thread_id: str, request: ResumeRequest):
         "recursion_limit": 20,
     }
 
+    graph = get_research_graph()
     result = graph.invoke(
         Command(
             resume={
@@ -128,4 +156,4 @@ def resume_research(thread_id: str, request: ResumeRequest):
         config=config,
     )
 
-    return build_response(result, thread_id)
+    return build_response(result, thread_id, graph)

@@ -16,9 +16,9 @@ class TrackingMockVideoProvider(MockVideoProvider):
         self.submit_call_count += 1
         return super().submit(request, model)
 
-    def poll(self, job_id: str):
+    def poll(self, job):
         self.poll_call_count += 1
-        return super().poll(job_id)
+        return super().poll(job)
 
 
 def make_text_to_video_request(

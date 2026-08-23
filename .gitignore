@@ -1,6 +1,11 @@
 .env
 __pycache__/
 .pytest_cache/
+.pytest_review/
+.pytest_run_*/
+.pytest_runtime_*/
 *.pyc
 *.db
 data/
+frontend/node_modules/
+frontend/dist/

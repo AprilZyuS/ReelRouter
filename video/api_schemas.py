@@ -95,6 +95,7 @@ class VideoJobStatusResponse(BaseModel):
 
     job_id: str
     model_id: str
+    provider: str
     status: JobStatus
     cost: CostRecordResponse
     output_url: str | None = None
@@ -108,6 +109,7 @@ class VideoJobStatusResponse(BaseModel):
         return cls(
             job_id=job.job_id,
             model_id=job.model_id,
+            provider=job.provider,
             status=job.status,
             cost=CostRecordResponse.from_domain(job.cost),
             output_url=job.output_url,

@@ -1,6 +1,6 @@
 import pytest
 
-from video.model_registry import get_model, list_models, supports_request
+from video.model_registry import build_seedance_model, get_model, list_models, supports_request
 from video.schemas import GenerationMode, VideoRequest
 
 @pytest.mark.parametrize("min_quality_score", [0, 11])
@@ -44,6 +44,14 @@ def test_get_model_returns_requested_profile():
 def test_get_model_raises_for_unknown_model_id():
     with pytest.raises(ValueError, match="不存在模型"):
         get_model("model-does-not-exist")
+
+
+def test_seedance_profile_has_its_documented_duration_boundary():
+    model = build_seedance_model(cost_per_second=0.15)
+
+    assert model.provider == "seedance"
+    assert model.min_duration_seconds == 4
+    assert model.max_duration_seconds == 15
 
 
 def test_economy_does_not_support_image_to_video():

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from video.model_router import ModelSelection, select_model as select_video_model
 from video.output_review import VideoOutputReview
 from video.providers.base import VideoProvider
-from video.schemas import JobStatus, VideoGenerationJob, VideoRequest
+from video.schemas import JobStatus, VideoGenerationJob, VideoModelProfile, VideoRequest
 from video.repository import VideoJobRepository
 
 
@@ -18,13 +18,20 @@ class GenerationSubmission:
 class VideoGenerationService:
     """编排模型选择、任务提交、查询与完成视频的人审。"""
 
-    def __init__(self, provider: VideoProvider, repository: VideoJobRepository,) -> None:
+    def __init__(
+        self,
+        provider: VideoProvider,
+        repository: VideoJobRepository,
+        *,
+        models: tuple[VideoModelProfile, ...] | None = None,
+    ) -> None:
         self.provider = provider
-        # v1 先放在进程内；持久化存储是后续部署阶段的工作。
+        # Repository 在开发时可为内存实现，生产运行时使用 MySQL 实现。
         self.repository = repository
+        self.models = models
 
     def select_for_request(self, request: VideoRequest) -> ModelSelection:
-        return select_video_model(request)
+        return select_video_model(request, models=self.models)
 
     def submit_selected(
         self,
@@ -45,7 +52,12 @@ class VideoGenerationService:
         if previous_job is None:
             raise ValueError(f"不存在任务：{job_id}")
 
-        job = self.provider.poll(job_id)
+        # 已结束任务的最终状态已被 MySQL 保存，重启后不应再依赖 Provider
+        # 进程内缓存才能展示结果或接受人工输出评审。
+        if previous_job.status in {JobStatus.COMPLETED, JobStatus.FAILED}:
+            return previous_job
+
+        job = self.provider.poll(previous_job)
 
         # Provider 不知道平台内部的人审结果，因此把旧的人审结果带回来。
         if previous_job.output_review is not None:

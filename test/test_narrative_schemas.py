@@ -27,6 +27,9 @@ def make_episode(*, number: int = 1) -> EpisodePlan:
         source_chapter_start=number,
         source_chapter_end=number + 1,
         target_duration_seconds=45,
+        episode_goal=f"推进第 {number} 集的核心线索。",
+        closing_hook=f"第 {number} 集结尾留下新的悬念。",
+        source_chunk_ids=[f"chunk-{number:03d}"],
     )
 
 
@@ -75,6 +78,9 @@ def test_episode_rejects_reversed_chapter_range():
             source_chapter_start=3,
             source_chapter_end=2,
             target_duration_seconds=45,
+            episode_goal="追查港口仓库中的匿名来信来源。",
+            closing_hook="仓库里传来未知脚步声。",
+            source_chunk_ids=["chunk-001"],
         )
 
 
@@ -84,11 +90,17 @@ def test_screenplay_rejects_duplicate_scene_ids():
         order=1,
         narration="林舟读到来信。",
         visual_description="雨夜室内，信封被打开。",
-        duration_seconds=5,
+        duration_seconds=8,
+        source_chunk_ids=["chunk-001"],
     )
 
     with pytest.raises(ValidationError, match="scene_id"):
-        Screenplay(scenes=[scene, scene.model_copy(update={"order": 2})])
+        Screenplay(
+            project_id="project-001",
+            episode_number=1,
+            target_duration_seconds=16,
+            scenes=[scene, scene.model_copy(update={"order": 2})],
+        )
 
 
 def test_key_shot_requires_high_minimum_quality():

@@ -50,7 +50,9 @@ def build_video_workflow(
                 state["request"],
                 state["selection"],
             )
-        except ValueError as error:
+        # Provider 的网络、鉴权、配额和输入校验失败会抛 RuntimeError。
+        # 不能让真实供应商的预期失败穿透为 FastAPI 的无诊断 500。
+        except (ValueError, RuntimeError) as error:
             return {"error": str(error)}
 
         return {"job": job}
