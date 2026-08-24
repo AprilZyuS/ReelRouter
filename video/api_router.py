@@ -20,7 +20,10 @@ from video.approval_repository import (
     VideoApprovalRepository,
 )
 from video.model_router import ModelSelection
-from video.provider_factory import create_provider_bundle
+from video.provider_factory import (
+    VideoProviderConfigurationError,
+    create_provider_bundle,
+)
 from video.service import VideoGenerationService
 from video.workflow import build_video_workflow
 from functools import lru_cache
@@ -76,13 +79,25 @@ def get_default_video_runtime():
 
 def get_video_service() -> VideoGenerationService:
     """FastAPI 获取生产环境的视频 Service。"""
-    service, _ = get_default_video_runtime()
+    try:
+        service, _ = get_default_video_runtime()
+    except VideoProviderConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"视频 Provider 配置无效：{error}",
+        ) from error
     return service
 
 
 def get_video_workflow():
     """FastAPI 获取生产环境的视频工作流。"""
-    _, workflow = get_default_video_runtime()
+    try:
+        _, workflow = get_default_video_runtime()
+    except VideoProviderConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"视频 Provider 配置无效：{error}",
+        ) from error
     return workflow
 
 

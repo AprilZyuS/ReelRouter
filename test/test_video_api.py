@@ -1,5 +1,7 @@
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+import pytest
 
 from video.api_router import (
     create_video_runtime,
@@ -8,6 +10,7 @@ from video.api_router import (
     get_video_workflow,
     router,
 )
+from video.provider_factory import VideoProviderConfigurationError
 from video.approval_repository import InMemoryVideoApprovalRepository
 from video.checkpoint import create_video_checkpointer
 from video.model_registry import list_models
@@ -225,6 +228,24 @@ def test_unknown_workflow_approval_returns_not_found():
     )
 
     assert response.status_code == 404
+
+
+def test_video_provider_configuration_error_is_exposed_as_503(monkeypatch):
+    """预检不应把缺失或占位的 Provider 配置伪装成内部 500。"""
+    import video.api_router as api_router
+
+    def raise_configuration_error():
+        raise VideoProviderConfigurationError(
+            "SEEDANCE_ESTIMATED_COST_PER_SECOND_USD 必须是数字。"
+        )
+
+    monkeypatch.setattr(api_router, "get_default_video_runtime", raise_configuration_error)
+
+    with pytest.raises(HTTPException) as error:
+        api_router.get_video_service()
+
+    assert error.value.status_code == 503
+    assert "SEEDANCE_ESTIMATED_COST_PER_SECOND_USD" in str(error.value.detail)
 
 
 def test_high_cost_approval_recovers_after_workflow_memory_restart():

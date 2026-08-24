@@ -263,7 +263,9 @@ class Storyboard(BaseModel):
     project_id: str = Field(min_length=1, max_length=64)
     episode_number: int = Field(ge=1)
     target_duration_seconds: int = Field(ge=15, le=60)
-    shots: list[StoryboardShot] = Field(min_length=6, max_length=12)
+    # 少于 24 秒的单集可能无法同时满足“至少 6 镜头”和某些 Provider 的最短镜头限制；
+    # 具体数量由 StoryboardVideoConstraints 按当前模型能力进一步收紧。
+    shots: list[StoryboardShot] = Field(min_length=3, max_length=12)
 
     @model_validator(mode="after")
     def validate_shot_sequence(self) -> "Storyboard":
@@ -302,7 +304,7 @@ class PrioritizedStoryboard(BaseModel):
     project_id: str = Field(min_length=1, max_length=64)
     episode_number: int = Field(ge=1)
     target_duration_seconds: int = Field(ge=15, le=60)
-    shots: list[PrioritizedShot] = Field(min_length=6, max_length=12)
+    shots: list[PrioritizedShot] = Field(min_length=3, max_length=12)
 
     @model_validator(mode="after")
     def validate_prioritized_sequence(self) -> "PrioritizedStoryboard":

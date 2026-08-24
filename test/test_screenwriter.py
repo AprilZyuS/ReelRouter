@@ -203,6 +203,22 @@ def test_write_retries_once_after_invalid_json():
     ]
 
 
+def test_retry_prompt_includes_a_safe_spoken_text_target():
+    overlong_payload = json.loads(valid_response())
+    overlong_payload["scenes"][0]["duration_seconds"] = 8
+    overlong_payload["scenes"][0]["narration"] = "信息过载" * 16
+    overlong_payload["scenes"][3]["duration_seconds"] = 15
+    client = SequenceScreenwriterClient([
+        json.dumps(overlong_payload, ensure_ascii=False),
+        valid_response(),
+    ])
+
+    Screenwriter(client, max_format_retries=1).write(make_context())
+
+    assert "scene-001（64/56 字，重写目标≤48 字）" in client.user_prompts[1]
+    assert "压缩到报错中“重写目标”以内" in client.user_prompts[1]
+
+
 def test_screenwriter_rejects_negative_format_retry_limit():
     with pytest.raises(ValueError, match="max_format_retries"):
         Screenwriter(FakeScreenwriterClient(valid_response()), max_format_retries=-1)

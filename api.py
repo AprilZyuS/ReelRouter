@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from langgraph.types import Command
+from narrative.api_router import router as narrative_router
 from video.api_router import router as video_router
 
 app = FastAPI(
@@ -18,7 +19,13 @@ app = FastAPI(
 
 # 浏览器前端与 FastAPI 在开发环境使用不同端口；明确列出可信来源，
 # 不使用允许任意来源的 CORS 配置。
-_default_web_origins = "http://127.0.0.1:5173,http://localhost:5173"
+# Vite 在 5173 被占用时会自动切换到 5174、5175 等端口。开发环境只放行
+# 本机这一小段端口，避免前端端口切换后 OPTIONS 预检被错误拒绝。
+_default_web_origins = ",".join(
+    f"{host}:{port}"
+    for host in ("http://127.0.0.1", "http://localhost")
+    for port in range(5173, 5180)
+)
 _web_origins = [
     origin.strip()
     for origin in os.getenv("WEB_ALLOWED_ORIGINS", _default_web_origins).split(",")
@@ -33,6 +40,7 @@ app.add_middleware(
 )
 
 app.include_router(video_router)
+app.include_router(narrative_router)
 
 
 @lru_cache

@@ -22,21 +22,34 @@ class ProviderBundle:
     models: tuple[VideoModelProfile, ...]
 
 
+class VideoProviderConfigurationError(ValueError):
+    """视频 Provider 的环境变量或模型选择无效，调用方应返回服务不可用。"""
+
+
 def create_provider_bundle(provider_name: str | None = None) -> ProviderBundle:
     selected = (provider_name or os.getenv("VIDEO_PROVIDER", "mock")).strip().lower()
     if selected == "mock":
         return ProviderBundle("mock", MockVideoProvider(), tuple(list_models(provider="mock")))
     if selected == "runway":
+        try:
+            settings = RunwaySettings.from_environment()
+        except ValueError as error:
+            raise VideoProviderConfigurationError(str(error)) from error
         return ProviderBundle(
             "runway",
-            RunwayProvider(RunwaySettings.from_environment()),
+            RunwayProvider(settings),
             tuple(list_models(provider="runway")),
         )
     if selected == "seedance":
-        settings = ArkVideoSettings.from_environment()
+        try:
+            settings = ArkVideoSettings.from_environment()
+        except ValueError as error:
+            raise VideoProviderConfigurationError(str(error)) from error
         return ProviderBundle(
             "seedance",
             SeedanceProvider(settings),
             (build_seedance_model(cost_per_second=settings.estimated_cost_per_second_usd),),
         )
-    raise ValueError("VIDEO_PROVIDER 只能是 mock、runway 或 seedance。")
+    raise VideoProviderConfigurationError(
+        "VIDEO_PROVIDER 只能是 mock、runway 或 seedance。"
+    )

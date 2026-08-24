@@ -3,7 +3,12 @@ import json
 import pytest
 
 from narrative.schemas import ContextPack, EpisodePlan, Screenplay, ScreenplayScene, SourceChunk
-from narrative.storyboard_writer import StoryboardOutputError, StoryboardWriter
+from narrative.storyboard_writer import (
+    StoryboardOutputError,
+    StoryboardVideoConstraints,
+    StoryboardWriter,
+)
+from video.model_registry import build_seedance_model
 
 
 class FakeClient:
@@ -44,3 +49,27 @@ def test_create_rejects_unknown_scene_or_evidence():
         StoryboardWriter(FakeClient(response(scene_id="unknown")), max_format_retries=0).create(context, screenplay)
     with pytest.raises(StoryboardOutputError, match="source_chunk_ids"):
         StoryboardWriter(FakeClient(response(chunk_id="other")), max_format_retries=0).create(context, screenplay)
+
+
+def test_seedance_constraints_limit_a_45_second_episode_to_eleven_shots():
+    constraints = StoryboardVideoConstraints.from_video_models(
+        (build_seedance_model(cost_per_second=0.15),),
+        target_duration_seconds=45,
+    )
+
+    assert constraints.min_duration_seconds == 4
+    assert constraints.max_shot_count == 11
+    assert "6 到 11 项" in StoryboardWriter._system_prompt(constraints)
+    assert "4-10 秒" in StoryboardWriter._system_prompt(constraints)
+
+
+def test_storyboard_contract_error_identifies_the_invalid_field():
+    context, screenplay = context_and_screenplay()
+    payload = json.loads(response())
+    del payload["shots"][0]["duration_seconds"]
+
+    with pytest.raises(StoryboardOutputError, match="shots.0.duration_seconds"):
+        StoryboardWriter(
+            FakeClient(json.dumps(payload, ensure_ascii=False)),
+            max_format_retries=0,
+        ).create(context, screenplay)

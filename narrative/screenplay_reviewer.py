@@ -58,9 +58,7 @@ class ScreenplayReviewer:
                 self._validate_result(result, context)
                 return result
             except ValidationError as error:
-                output_error = ScreenplayReviewOutputError(
-                    "Reviewer 返回的内容不符合 ScreenplayReview 数据契约。"
-                )
+                output_error = self._build_contract_error(error)
                 output_error.__cause__ = error
             except ScreenplayReviewOutputError as error:
                 output_error = error
@@ -90,8 +88,15 @@ class ScreenplayReviewer:
 5. 是否保留可供下一集使用的未解线索。
 
 只返回一个合法 JSON 对象，且只能有 passed、feedback、violations、episode_summary。
-passed 为 true 时，episode_summary 必须包含 recap 与 unresolved_loops；
-passed 为 false 时，episode_summary 必须为 null。不要输出 Markdown 或解释文字。"""
+passed 为 true 时，episode_summary 必须包含 episode_number、recap、unresolved_loops，
+其中 episode_number 必须等于正在审查的 episode.episode_number；
+passed 为 false 时，episode_summary 必须为 null，且 violations 至少包含一项。
+
+通过时的唯一 JSON 结构示例：
+{"passed": true, "feedback": "本集边界清晰。", "violations": [], "episode_summary": {"episode_number": 1, "recap": "本集发生的事实。", "unresolved_loops": ["留给下一集的线索"]}}
+不通过时的唯一 JSON 结构示例：
+{"passed": false, "feedback": "本集提前揭示了后续真相。", "violations": ["提前解决 must_defer"], "episode_summary": null}
+不要输出 Markdown 或解释文字。"""
 
     @staticmethod
     def _build_user_prompt(context: ContextPack, screenplay: Screenplay) -> str:
@@ -121,6 +126,21 @@ passed 为 false 时，episode_summary 必须为 null。不要输出 Markdown �
         if not isinstance(payload, dict):
             raise ScreenplayReviewOutputError("Reviewer 返回的 JSON 顶层必须是对象。")
         return payload
+
+    @staticmethod
+    def _build_contract_error(error: ValidationError) -> ScreenplayReviewOutputError:
+        """仅输出字段路径和校验原因，便于模型重试与前端定位，不泄露原始响应。"""
+
+        details: list[str] = []
+        for issue in error.errors(include_url=False):
+            location = ".".join(str(item) for item in issue.get("loc", ()))
+            message = str(issue.get("msg", "字段不符合要求"))
+            details.append(f"{location}：{message}" if location else message)
+        suffix = "；".join(details[:6])
+        message = "Reviewer 返回的内容不符合 ScreenplayReview 数据契约。"
+        if suffix:
+            message += " 缺失或无效字段：" + suffix
+        return ScreenplayReviewOutputError(message)
 
     @staticmethod
     def _validate_input(context: ContextPack, screenplay: Screenplay) -> None:

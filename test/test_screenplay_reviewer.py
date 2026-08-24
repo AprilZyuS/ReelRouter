@@ -75,3 +75,26 @@ def test_reviewer_rejects_failed_result_without_violations():
 
     with pytest.raises(ScreenplayReviewOutputError, match="violations"):
         ScreenplayReviewer(client, max_format_retries=0).review(context, screenplay)
+
+
+def test_reviewer_prompt_requires_episode_summary_episode_number():
+    prompt = ScreenplayReviewer._build_system_prompt()
+
+    assert "episode_number、recap、unresolved_loops" in prompt
+    assert '"episode_number": 1' in prompt
+
+
+def test_reviewer_contract_error_identifies_missing_episode_summary_number():
+    context, screenplay = make_context_and_screenplay()
+    client = FakeClient({
+        "passed": True,
+        "feedback": "本集边界清晰。",
+        "violations": [],
+        "episode_summary": {
+            "recap": "主角收到匿名信并听见脚步声。",
+            "unresolved_loops": ["脚步声是谁？"],
+        },
+    })
+
+    with pytest.raises(ScreenplayReviewOutputError, match="episode_summary.episode_number"):
+        ScreenplayReviewer(client, max_format_retries=0).review(context, screenplay)

@@ -12,6 +12,8 @@ from narrative.schemas import ContextPack, Screenplay
 
 
 MAX_SPOKEN_CHARACTERS_PER_SECOND = 7
+# 给模型的目标比硬校验略保守，为标点、停顿和情绪表演留出余量。
+TARGET_SPOKEN_CHARACTERS_PER_SECOND = 6
 
 
 class ScreenwriterClient(Protocol):
@@ -104,8 +106,11 @@ duration_seconds、source_chunk_ids。
 1. order 必须从 1 连续递增，scene_id 必须唯一。
 2. 所有 duration_seconds 的和必须严格等于 Context Pack 中的目标时长；单个场景为 2 到 15 秒。
 3. 每个场景都必须引用至少一个 Context Pack 中提供的 source_chunk_ids，不能编造 ID。
-4. narration 与 dialogue 的非空白字符总数不得超过场景秒数乘以 7；不要在 narration 中重复 dialogue。
-   visual_description 必须可拍摄。
+4. narration 与 dialogue 的非空白字符总数需要一起计算，不要在 narration 中重复 dialogue。
+   先为场景分配 duration_seconds，再控制口播：建议目标为“场景秒数 × 6”字，
+   硬上限为“场景秒数 × 7”字。例如 6 秒镜头建议不超过 36 字，绝不能超过 42 字；
+   8 秒镜头建议不超过 48 字，绝不能超过 56 字。短镜头有对白时，应优先减少旁白。
+   visual_description 不计入上述口播字数，但必须可拍摄。
 5. 如果 episode.scope 存在：只可推进 must_include，不能展开或解决 must_defer；
    最后一个场景必须自然落在 scope.ending_beat 与 closing_hook，而不是提前解决悬念。
 6. 每个场景的 source_chunk_ids 只能引用 episode.source_chunk_ids。Context Pack 中其余
@@ -144,7 +149,7 @@ duration_seconds、source_chunk_ids。
             + str(error)
             + "\n请完整重写，并逐项修复以上问题。"
             + "\n若提示口播预算超标，必须将对应场景的 narration + dialogue "
-            "压缩到报错中“实际/上限”里的上限以内。"
+            "压缩到报错中“重写目标”以内；这是为了给配音停顿预留余量。"
             + "\n不得改变 target_duration_seconds、场景数量、scene_id、"
             "scene 顺序、source_chunk_ids 或最后的 closing_hook。"
             + "\n只返回可被 json.loads 解析的 JSON 对象，不能解释。"
@@ -191,6 +196,7 @@ duration_seconds、source_chunk_ids。
                 scene.scene_id,
                 Screenwriter._spoken_character_count(scene.narration, scene.dialogue),
                 scene.duration_seconds * MAX_SPOKEN_CHARACTERS_PER_SECOND,
+                scene.duration_seconds * TARGET_SPOKEN_CHARACTERS_PER_SECOND,
             )
             for scene in screenplay.scenes
             if Screenwriter._spoken_character_count(scene.narration, scene.dialogue)
@@ -198,8 +204,8 @@ duration_seconds、source_chunk_ids。
         ]
         if overlong_scenes:
             details = ", ".join(
-                f"{scene_id}（{actual}/{limit} 字）"
-                for scene_id, actual, limit in overlong_scenes
+                f"{scene_id}（{actual}/{limit} 字，重写目标≤{target} 字）"
+                for scene_id, actual, limit, target in overlong_scenes
             )
             raise ScreenwriterOutputError(
                 "以下场景的旁白与对白超出时长可承载的口播预算：" + details
